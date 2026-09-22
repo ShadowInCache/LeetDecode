@@ -10,7 +10,7 @@ if you do scale out, set ENABLE_SCHEDULER=false on all but one instance.
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from app.config import Settings
 from app.daily import refresh_daily_problem
@@ -35,19 +35,27 @@ def start_scheduler(settings: Settings) -> BackgroundScheduler | None:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(
         refresh_daily_problem,
-        trigger=IntervalTrigger(hours=24),
+        # A fixed wall-clock time, deliberately not IntervalTrigger(hours=24).
+        # An interval counts from process start, and every redeploy, crash or
+        # platform restart resets that countdown - so on a service that ships
+        # more than once a day the job would never fire at all.
+        trigger=CronTrigger(hour=settings.daily_job_hour, minute=0),
         id=DAILY_JOB_ID,
         name="Fetch and pre-cache the LeetCode daily problem",
         # If the process was asleep past a fire time, run once on wake rather
         # than replaying every window we missed.
         coalesce=True,
         max_instances=1,
-        # Give the web server a minute to come up before doing network work.
+        # Tolerate an hour of downtime before treating a fire time as missed.
         misfire_grace_time=3600,
     )
     scheduler.start()
     _scheduler = scheduler
-    logger.info("scheduler started with job %r (every 24h)", DAILY_JOB_ID)
+    logger.info(
+        "scheduler started with job %r (daily at %02d:00 UTC)",
+        DAILY_JOB_ID,
+        settings.daily_job_hour,
+    )
     return scheduler
 
 

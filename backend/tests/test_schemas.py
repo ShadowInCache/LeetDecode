@@ -122,3 +122,30 @@ def test_translate_response_source_is_constrained() -> None:
     assert ok.source == "cache"
     with pytest.raises(ValidationError):
         TranslateResponse(source="guess", data=SimplifiedProblem.model_validate(VALID))
+
+
+class TestGroqSchema:
+    """Groq's strict mode needs the opposite of what Gemini needs."""
+
+    def test_keeps_additional_properties_false(self) -> None:
+        from app.schemas import groq_json_schema
+
+        schema = groq_json_schema()
+        # `strict: true` on Groq requires this; Gemini rejects it.
+        assert schema["additionalProperties"] is False
+        assert schema["properties"]["example"]["additionalProperties"] is False
+
+    def test_still_drops_refs_and_constraints(self) -> None:
+        import json as _json
+
+        from app.schemas import groq_json_schema
+
+        blob = _json.dumps(groq_json_schema())
+        for keyword in ("$ref", "$defs", "minLength", "minItems", "title"):
+            assert keyword not in blob
+
+    def test_the_two_providers_get_different_schemas(self) -> None:
+        from app.schemas import gemini_json_schema, groq_json_schema
+
+        assert "additionalProperties" not in gemini_json_schema()
+        assert "additionalProperties" in groq_json_schema()

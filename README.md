@@ -21,7 +21,7 @@ five free generations per install.
 │   1. hash(raw_text) → problems_cache            │  hit  → free, no quota
 │   2. title fallback → preseeded rows            │  hit  → free, no quota
 │   3. quota check (5 per install)                │  over → 403 QUOTA_EXCEEDED
-│   4. Gemini → validate → (on failure) Grok      │  fail → 502, no quota spent
+│   4. Gemini → validate → (on failure) Groq      │  fail → 502, no quota spent
 │   5. cache + increment                          │
 │                                                 │
 │  APScheduler, every 24h: LeetCode daily problem │
@@ -90,19 +90,21 @@ All backend settings are environment variables, documented in
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `GEMINI_API_KEY` | yes¹ | — | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| `XAI_API_KEY` | no¹ | — | [console.x.ai](https://console.x.ai/) — needed only if Grok is in the chain |
+| `GROQ_API_KEY` | no¹ | — | [console.groq.com/keys](https://console.groq.com/keys) — needed only if Groq is in the chain |
 | `DATABASE_URL` | yes | — | Railway injects this automatically |
-| `LLM_PROVIDER` | no | `gemini` | `gemini` \| `grok` |
-| `LLM_FALLBACK_PROVIDER` | no | `grok` | Blank disables failover |
+| `LLM_PROVIDER` | no | `gemini` | `gemini` \| `groq` |
+| `LLM_FALLBACK_PROVIDER` | no | `groq` | Blank disables failover |
 | `GEMINI_MODEL` | no | `gemini-3.1-flash-lite` | $0.25/$1.50 per 1M tokens |
-| `GROK_MODEL` | no | `grok-4.3` | $1.25/$2.50 per 1M tokens |
+| `GROQ_MODEL` | no | `openai/gpt-oss-120b` | $0.15/$0.60 per 1M tokens |
 | `LLM_MAX_TOKENS` | no | `2000` | Per-translation output cap |
+| `LLM_TIMEOUT_SECONDS` | no | `45` | Per-call ceiling; fail over rather than hang |
 | `FREE_CALL_LIMIT` | no | `5` | Free generations per install |
 | `CORS_ALLOW_ORIGINS` | no | `*` | Comma-separated, or `*` |
 | `ENABLE_SCHEDULER` | no | `true` | `false` to skip the daily job |
+| `DAILY_JOB_HOUR` | no | `3` | UTC hour for the daily job (wall-clock, not an interval) |
 
 ¹ You need a key for whichever providers are in the chain. With the defaults,
-Gemini is required and Grok is optional — a missing `XAI_API_KEY` just means the
+Gemini is required and Groq is optional — a missing `GROQ_API_KEY` just means the
 fallback is skipped rather than an error.
 
 ---
@@ -156,6 +158,10 @@ python scripts/run_daily_job.py
 
 # Fetch the daily problem and print it. No LLM, no API key, no cost.
 python scripts/fetch_daily_only.py
+
+# One real call per configured provider, validated. Costs a fraction of a cent.
+python scripts/smoke_llm.py
+python scripts/smoke_llm.py --show
 ```
 
 `preseed.py` is safe to re-run: anything already cached is skipped without an
@@ -173,11 +179,12 @@ title fallback reads. A CSV with `title,body` columns works too.
 
 ```powershell
 cd backend
-pytest -q          # 101 tests, no API key or database server required
+pytest -q          # 114 tests, no API key or database server required
 ```
 
 The suite runs against in-memory SQLite with the LLM providers faked, so it needs
-no credentials and no running Postgres. It covers schema rejection, provider
+no credentials and no running Postgres. For a real call against the live
+providers, use `scripts/smoke_llm.py` instead. It covers schema rejection, provider
 failover, cache hit/miss, quota accounting, the daily job, and seed-file parsing.
 
 ---
@@ -192,8 +199,8 @@ failover, cache hit/miss, quota accounting, the daily job, and seed-file parsing
    `DATABASE_URL` into the service automatically. (It hands out a `postgres://`
    URL; [`app/db.py`](backend/app/db.py) rewrites that to `postgresql://`, which
    is what SQLAlchemy needs.)
-4. **Set the variables** — at minimum `GEMINI_API_KEY`. Add `XAI_API_KEY` if you
-   want the Grok fallback live.
+4. **Set the variables** — at minimum `GEMINI_API_KEY`. Add `GROQ_API_KEY` if you
+   want the Groq fallback live.
 5. **Deploy.** [`railway.json`](backend/railway.json) supplies the start command
    and points the healthcheck at `/health`; [`Procfile`](backend/Procfile) is
    there as a fallback for other Nixpacks/Heroku-style platforms.
@@ -231,12 +238,12 @@ backend/
       prompt.py        The one shared system prompt
       base.py          LLMProvider protocol + typed errors
       gemini.py        Google Gemini adapter (primary)
-      grok.py          xAI Grok adapter (fallback)
+      groq_provider.py Groq (GroqCloud) adapter (fallback)
       service.py       Provider chain, failover, validation gate
     routers/           health.py, translate.py, usage.py
   scripts/             preseed.py, run_daily_job.py, fetch_daily_only.py
   data/                seed_problems.json
-  tests/               101 tests
+  tests/               114 tests
 extension/
   manifest.json        MV3, `storage` permission only
   popup.html/css/js    The entire UI

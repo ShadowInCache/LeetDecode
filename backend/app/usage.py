@@ -1,13 +1,23 @@
 """Per-install free-quota accounting.
 
 The rule from the SRS: cache hits are free and unlimited; only a cache *miss*
-that reaches the LLM costs one of the five free calls. The counter is
-incremented after a successful, validated generation - never before - so a
-provider outage or a schema-invalid response does not burn a user's quota.
+that reaches the LLM costs one of the five free calls.
+
+Concurrency note. The obvious implementation - read the counter, compare it to
+the limit, call the LLM, then increment - has a race: a generation takes
+seconds, and every concurrent request for the same install reads the same
+pre-increment value and passes the check. Five parallel requests against a
+one-call allowance all succeed.
+
+So the counter is claimed up front with a single conditional UPDATE, which the
+database evaluates atomically, and refunded if the generation then fails. The
+SRS property "a failed generation never costs the user" is preserved, and the
+window where two requests can both pass is gone.
 """
 
 import logging
 
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.config import Settings, get_settings
@@ -30,7 +40,18 @@ def get_or_create(
     if row is None:
         row = UsageLog(install_id=install_id, ip_address=ip_address)
         session.add(row)
-        session.commit()
+        try:
+            session.commit()
+        except Exception:
+            # Two first-ever requests for one install can race on the unique
+            # install_id. Whoever lost just re-reads the winner's row.
+            session.rollback()
+            row = session.exec(
+                select(UsageLog).where(UsageLog.install_id == install_id)
+            ).first()
+            if row is None:
+                raise
+            return row
         session.refresh(row)
         logger.info("new install registered install_id=%s", install_id)
         return row
@@ -46,33 +67,63 @@ def get_or_create(
     return row
 
 
-def has_quota(row: UsageLog, settings: Settings | None = None) -> bool:
-    """True if this install may still spend a free LLM call."""
-    settings = settings or get_settings()
-    return row.free_llm_calls_used < settings.free_call_limit
-
-
 def remaining(row: UsageLog, settings: Settings | None = None) -> int:
     """Free calls left, floored at zero."""
     settings = settings or get_settings()
     return max(0, settings.free_call_limit - row.free_llm_calls_used)
 
 
-def record_llm_call(session: Session, row: UsageLog) -> UsageLog:
-    """Increment the counter after a successful generation."""
-    row.free_llm_calls_used += 1
-    row.last_request_at = utcnow()
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-    logger.info(
-        "llm call recorded install_id=%s used=%d", row.install_id, row.free_llm_calls_used
+def try_reserve_call(
+    session: Session, install_id: str, settings: Settings | None = None
+) -> bool:
+    """Atomically claim one free call. True if claimed, False if out of quota.
+
+    The `WHERE free_llm_calls_used < limit` runs inside the UPDATE, so the
+    database decides the winner. Concurrent callers cannot both see room.
+
+    Call this *before* the LLM request, and `refund_call()` if it fails.
+    """
+    settings = settings or get_settings()
+
+    result = session.execute(
+        update(UsageLog)
+        .where(UsageLog.install_id == install_id)
+        .where(UsageLog.free_llm_calls_used < settings.free_call_limit)
+        .values(
+            free_llm_calls_used=UsageLog.free_llm_calls_used + 1,
+            last_request_at=utcnow(),
+        )
     )
-    return row
+    session.commit()
+
+    claimed = result.rowcount > 0
+    if claimed:
+        logger.info("quota call reserved install_id=%s", install_id)
+    else:
+        logger.info("quota exhausted install_id=%s", install_id)
+    return claimed
 
 
-def touch(session: Session, row: UsageLog) -> None:
+def refund_call(session: Session, install_id: str) -> None:
+    """Give back a reserved call after a failed generation.
+
+    Guarded with `> 0` so a double refund can never drive the counter negative.
+    """
+    session.execute(
+        update(UsageLog)
+        .where(UsageLog.install_id == install_id)
+        .where(UsageLog.free_llm_calls_used > 0)
+        .values(free_llm_calls_used=UsageLog.free_llm_calls_used - 1)
+    )
+    session.commit()
+    logger.info("quota call refunded install_id=%s", install_id)
+
+
+def touch(session: Session, install_id: str) -> None:
     """Update last-seen without spending quota (used on cache hits)."""
-    row.last_request_at = utcnow()
-    session.add(row)
+    session.execute(
+        update(UsageLog)
+        .where(UsageLog.install_id == install_id)
+        .values(last_request_at=utcnow())
+    )
     session.commit()

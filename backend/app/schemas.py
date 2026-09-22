@@ -7,9 +7,9 @@ Three groups live here:
    is cached or returned to anyone. A mismatch is an error, never a coercion.
 2. `TranslateRequest` / `TranslateResponse` / `UsageResponse` / `ErrorResponse`
    - the HTTP contracts the Chrome extension talks to.
-3. `gemini_json_schema()` - a provider-friendly rendering of the LLM contract,
-   used to constrain Gemini's generation. See its docstring for why it isn't
-   just `SimplifiedProblem.model_json_schema()`.
+3. `gemini_json_schema()` / `groq_json_schema()` - provider-friendly renderings
+   of the LLM contract, used to constrain generation. See `_base_schema()` for
+   why they aren't just `SimplifiedProblem.model_json_schema()`.
 """
 
 from typing import Annotated, Any, Literal
@@ -139,10 +139,10 @@ class ErrorResponse(BaseModel):
 # Provider-facing schema
 # ---------------------------------------------------------------------------
 
-# JSON Schema keywords Pydantic emits that Gemini's structured-output schema
-# parser does not accept. They are validation concerns, and validation is our
-# job, not the provider's - so they are stripped before the schema is sent.
-_UNSUPPORTED_KEYWORDS = frozenset(
+# Validation-only keywords Pydantic emits that provider schema parsers reject or
+# ignore. Validation is our job, not the provider's, so they are stripped before
+# the schema is sent upstream.
+_CONSTRAINT_KEYWORDS = frozenset(
     {
         "minLength",
         "maxLength",
@@ -152,10 +152,13 @@ _UNSUPPORTED_KEYWORDS = frozenset(
         "format",
         "default",
         "examples",
-        "additionalProperties",
         "title",
     }
 )
+
+# Gemini's parser additionally rejects `additionalProperties`. Groq's strict mode
+# *requires* it, so the two providers get different renderings of one contract.
+_GEMINI_DROP = _CONSTRAINT_KEYWORDS | {"additionalProperties"}
 
 
 def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
@@ -180,40 +183,47 @@ def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
     return {k: _inline_refs(v, defs) for k, v in node.items()}
 
 
-def _strip_unsupported(node: Any) -> Any:
-    """Drop validation-only keywords, recursively."""
+def _strip(node: Any, drop: frozenset[str]) -> Any:
+    """Recursively remove the given keywords."""
     if isinstance(node, list):
-        return [_strip_unsupported(item) for item in node]
+        return [_strip(item, drop) for item in node]
     if not isinstance(node, dict):
         return node
-    return {
-        k: _strip_unsupported(v)
-        for k, v in node.items()
-        if k not in _UNSUPPORTED_KEYWORDS
-    }
+    return {k: _strip(v, drop) for k, v in node.items() if k not in drop}
 
 
-def gemini_json_schema() -> dict[str, Any]:
-    """The `SimplifiedProblem` contract as a self-contained, portable JSON Schema.
+def _base_schema(drop: frozenset[str]) -> dict[str, Any]:
+    """`SimplifiedProblem` as a self-contained schema, minus `drop`.
 
-    Deliberately not `SimplifiedProblem.model_json_schema()` verbatim. That
-    output carries `$defs`/`$ref` indirection and constraint keywords
-    (`minLength`, `minItems`, ...) that Gemini's schema parser rejects or
-    ignores - and an unsupported keyword can fail the request outright.
+    Deliberately not `SimplifiedProblem.model_json_schema()` verbatim: that
+    carries `$defs`/`$ref` indirection and constraint keywords whose support
+    differs between providers, and an unsupported keyword can fail the request
+    outright.
 
-    So the schema we send upstream is a generation *hint* describing shape:
-    object structure, property names, types and descriptions. The authoritative
-    check stays local, in `SimplifiedProblem`, which every response must pass.
-    One source of truth, rendered two ways.
-
-    The Grok adapter does not use this: `xai-sdk` accepts the Pydantic model
-    class directly and builds its own schema.
+    What goes upstream is a generation *hint* describing shape - object
+    structure, property names, types and descriptions. The authoritative check
+    stays local, in `SimplifiedProblem`, which every response must pass. One
+    source of truth, rendered per provider.
     """
     raw = SimplifiedProblem.model_json_schema()
     defs = raw.pop("$defs", {})
-    schema = _strip_unsupported(_inline_refs(raw, defs))
+    schema = _strip(_inline_refs(raw, defs), drop)
     # The root description is just this class's docstring, which talks about
     # internals ("problems_cache", "the SRS"). Per-property descriptions are
     # useful to the model; that one is noise. The system prompt does the framing.
     schema.pop("description", None)
     return schema
+
+
+def gemini_json_schema() -> dict[str, Any]:
+    """Schema for Gemini's `response_format`, without `additionalProperties`."""
+    return _base_schema(_GEMINI_DROP)
+
+
+def groq_json_schema() -> dict[str, Any]:
+    """Schema for Groq's `json_schema` response format.
+
+    Keeps `additionalProperties: false` (emitted by `extra="forbid"`), which
+    Groq's `strict: true` mode requires and Gemini rejects.
+    """
+    return _base_schema(_CONSTRAINT_KEYWORDS)

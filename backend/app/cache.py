@@ -20,6 +20,7 @@ import logging
 import re
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.models import ProblemCache, utcnow
@@ -135,7 +136,23 @@ def store_translation(
         is_preseeded=is_preseeded,
     )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Another request cached the same problem between our SELECT above and
+        # this INSERT. `problem_hash` is unique, so one writer wins and the
+        # other lands here. That is a cache hit, not an error - roll back and
+        # return the row that won.
+        session.rollback()
+        winner = session.exec(
+            select(ProblemCache).where(ProblemCache.problem_hash == problem_hash)
+        ).first()
+        if winner is not None:
+            logger.info("concurrent insert for %r - using the stored row", problem_hash[:12])
+            return winner
+        # The constraint fired for some other reason; don't swallow it.
+        raise
+
     session.refresh(row)
     logger.info("cached translation preseeded=%s title=%r", is_preseeded, row.problem_title)
     return row

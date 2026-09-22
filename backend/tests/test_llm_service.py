@@ -45,12 +45,12 @@ class FakeProvider:
 
 @pytest.fixture
 def settings() -> Settings:
-    """Gemini primary, Grok fallback, both with dummy credentials."""
+    """Gemini primary, Groq fallback, both with dummy credentials."""
     return Settings(
         gemini_api_key="dummy-gemini",
-        xai_api_key="dummy-xai",
+        groq_api_key="dummy-groq",
         llm_provider=ProviderName.GEMINI,
-        llm_fallback_provider=ProviderName.GROK,
+        llm_fallback_provider=ProviderName.GROQ,
     )
 
 
@@ -116,29 +116,29 @@ class TestFailover:
         p = install_providers(
             **{
                 ProviderName.GEMINI: FakeProvider(ProviderName.GEMINI, returns=VALID_JSON),
-                ProviderName.GROK: FakeProvider(ProviderName.GROK, returns=VALID_JSON),
+                ProviderName.GROQ: FakeProvider(ProviderName.GROQ, returns=VALID_JSON),
             }
         )
         result = translate_problem("Two Sum\nGiven an array...", settings=settings)
 
         assert result.provider is ProviderName.GEMINI
         assert p[ProviderName.GEMINI].calls == 1
-        assert p[ProviderName.GROK].calls == 0
+        assert p[ProviderName.GROQ].calls == 0
 
-    def test_transport_failure_falls_through_to_grok(self, settings, install_providers):
+    def test_transport_failure_falls_through_to_groq(self, settings, install_providers):
         p = install_providers(
             **{
                 ProviderName.GEMINI: FakeProvider(
                     ProviderName.GEMINI, raises=ProviderCallFailed("429 rate limited")
                 ),
-                ProviderName.GROK: FakeProvider(ProviderName.GROK, returns=VALID_JSON),
+                ProviderName.GROQ: FakeProvider(ProviderName.GROQ, returns=VALID_JSON),
             }
         )
         result = translate_problem("Two Sum\nGiven an array...", settings=settings)
 
-        assert result.provider is ProviderName.GROK
+        assert result.provider is ProviderName.GROQ
         assert p[ProviderName.GEMINI].calls == 1
-        assert p[ProviderName.GROK].calls == 1
+        assert p[ProviderName.GROQ].calls == 1
 
     def test_schema_invalid_primary_also_falls_through(self, settings, install_providers):
         """A model that ignores the contract is treated like one that is down."""
@@ -147,13 +147,13 @@ class TestFailover:
                 ProviderName.GEMINI: FakeProvider(
                     ProviderName.GEMINI, returns='{"what_you_need_to_do": "only this"}'
                 ),
-                ProviderName.GROK: FakeProvider(ProviderName.GROK, returns=VALID_JSON),
+                ProviderName.GROQ: FakeProvider(ProviderName.GROQ, returns=VALID_JSON),
             }
         )
         result = translate_problem("Two Sum\nGiven an array...", settings=settings)
 
-        assert result.provider is ProviderName.GROK
-        assert p[ProviderName.GROK].calls == 1
+        assert result.provider is ProviderName.GROQ
+        assert p[ProviderName.GROQ].calls == 1
 
     def test_both_failing_raises_with_both_causes(self, settings, install_providers):
         install_providers(
@@ -161,16 +161,16 @@ class TestFailover:
                 ProviderName.GEMINI: FakeProvider(
                     ProviderName.GEMINI, raises=ProviderCallFailed("boom")
                 ),
-                ProviderName.GROK: FakeProvider(ProviderName.GROK, returns="not json"),
+                ProviderName.GROQ: FakeProvider(ProviderName.GROQ, returns="not json"),
             }
         )
         with pytest.raises(AllProvidersFailed) as exc_info:
             translate_problem("Two Sum\nGiven an array...", settings=settings)
 
         failures = exc_info.value.failures
-        assert set(failures) == {ProviderName.GEMINI, ProviderName.GROK}
+        assert set(failures) == {ProviderName.GEMINI, ProviderName.GROQ}
         assert isinstance(failures[ProviderName.GEMINI], ProviderCallFailed)
-        assert isinstance(failures[ProviderName.GROK], InvalidLLMOutput)
+        assert isinstance(failures[ProviderName.GROQ], InvalidLLMOutput)
 
     def test_fallback_disabled_means_one_attempt(self, install_providers):
         settings = Settings(
@@ -183,34 +183,34 @@ class TestFailover:
                 ProviderName.GEMINI: FakeProvider(
                     ProviderName.GEMINI, raises=ProviderCallFailed("boom")
                 ),
-                ProviderName.GROK: FakeProvider(ProviderName.GROK, returns=VALID_JSON),
+                ProviderName.GROQ: FakeProvider(ProviderName.GROQ, returns=VALID_JSON),
             }
         )
         with pytest.raises(AllProvidersFailed):
             translate_problem("Two Sum\nGiven an array...", settings=settings)
-        assert p[ProviderName.GROK].calls == 0
+        assert p[ProviderName.GROQ].calls == 0
 
     def test_unconfigured_primary_is_skipped_not_fatal(self, install_providers, monkeypatch):
-        """A missing GEMINI_API_KEY should degrade to Grok, not 502."""
+        """A missing GEMINI_API_KEY should degrade to Groq, not 502."""
         settings = Settings(
             gemini_api_key="",
-            xai_api_key="dummy-xai",
+            groq_api_key="dummy-groq",
             llm_provider=ProviderName.GEMINI,
-            llm_fallback_provider=ProviderName.GROK,
+            llm_fallback_provider=ProviderName.GROQ,
         )
 
         def gemini_factory(_s):
             raise ProviderNotConfigured("GEMINI_API_KEY is not set")
 
-        grok = FakeProvider(ProviderName.GROK, returns=VALID_JSON)
+        groq = FakeProvider(ProviderName.GROQ, returns=VALID_JSON)
         monkeypatch.setattr(
             service,
             "PROVIDER_FACTORIES",
-            {ProviderName.GEMINI: gemini_factory, ProviderName.GROK: lambda _s: grok},
+            {ProviderName.GEMINI: gemini_factory, ProviderName.GROQ: lambda _s: groq},
         )
 
         result = translate_problem("Two Sum\nGiven an array...", settings=settings)
-        assert result.provider is ProviderName.GROK
+        assert result.provider is ProviderName.GROQ
 
     def test_problem_text_reaches_the_provider(self, settings, install_providers):
         p = install_providers(

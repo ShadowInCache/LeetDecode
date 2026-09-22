@@ -53,23 +53,22 @@ def translate(
             data=SimplifiedProblem.model_validate(cached.simplified_json),
         )
 
-    # 2. Miss - this one costs quota, so check it before spending money.
-    usage_row = usage.get_or_create(
-        session, payload.install_id, ip_address=client_ip(request)
-    )
-    if not usage.has_quota(usage_row, settings):
-        logger.info("quota exceeded install_id=%s", payload.install_id)
+    # 2. Miss - this one costs quota. Claim the call atomically *before*
+    #    spending money, so concurrent requests can't both slip through the
+    #    check while a multi-second generation is in flight.
+    usage.get_or_create(session, payload.install_id, ip_address=client_ip(request))
+    if not usage.try_reserve_call(session, payload.install_id, settings):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"error": "QUOTA_EXCEEDED", "message": QUOTA_MESSAGE},
         )
 
-    # 3. Generate.
+    # 3. Generate. From here on the call is already reserved, so every failure
+    #    path below must refund it.
     try:
         result = translate_problem(payload.raw_text, settings=settings)
     except AllProvidersFailed as exc:
-        # Nothing is cached and no quota is spent - the failure is ours, not
-        # the user's, so it must not cost them one of their five calls.
+        usage.refund_call(session, payload.install_id)
         logger.error("translation failed for install_id=%s: %s", payload.install_id, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -81,10 +80,12 @@ def translate(
                 ),
             },
         ) from exc
+    except Exception:
+        # Anything unexpected is still our fault, not the user's.
+        usage.refund_call(session, payload.install_id)
+        raise
 
-    # 4. Only now, with a validated result in hand, does the call count.
     store_translation(session, raw_text=payload.raw_text, problem=result.problem)
-    usage.record_llm_call(session, usage_row)
 
     logger.info(
         "translated install_id=%s provider=%s", payload.install_id, result.provider.value

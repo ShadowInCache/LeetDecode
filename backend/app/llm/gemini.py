@@ -50,6 +50,9 @@ class GeminiProvider:
                     # one. Minimal thinking keeps latency and cost down.
                     "thinking_level": "minimal",
                 },
+                # Give up rather than hold a worker on a hung upstream; with a
+                # fallback configured we would rather fail over quickly.
+                timeout=self._settings.llm_timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001 - normalised into our own type
             raise ProviderCallFailed(f"Gemini request failed: {exc}") from exc

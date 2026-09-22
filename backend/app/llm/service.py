@@ -22,7 +22,7 @@ from app.llm.base import (
     ProviderNotConfigured,
 )
 from app.llm.gemini import GeminiProvider
-from app.llm.grok import GrokProvider
+from app.llm.groq_provider import GroqProvider
 from app.llm.prompt import SYSTEM_PROMPT, build_user_prompt
 from app.schemas import SimplifiedProblem
 
@@ -36,7 +36,7 @@ _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 PROVIDER_FACTORIES: dict[ProviderName, Callable[[Settings], LLMProvider]] = {
     ProviderName.GEMINI: GeminiProvider,
-    ProviderName.GROK: GrokProvider,
+    ProviderName.GROQ: GroqProvider,
 }
 
 

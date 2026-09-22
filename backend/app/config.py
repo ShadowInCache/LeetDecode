@@ -11,7 +11,7 @@ class ProviderName(str, Enum):
     """The LLM providers this backend knows how to talk to."""
 
     GEMINI = "gemini"
-    GROK = "grok"
+    GROQ = "groq"
 
 
 class Settings(BaseSettings):
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # Empty defaults so the app can boot (and /health can answer) before these
     # are set. Each adapter validates its own key at call time, not at import.
     gemini_api_key: str = ""
-    xai_api_key: str = ""
+    groq_api_key: str = ""
 
     # --- Provider selection ---
     # The primary provider serves every translation. If it raises (network
@@ -41,18 +41,24 @@ class Settings(BaseSettings):
     # validation, the fallback gets exactly one attempt. Set the fallback to an
     # empty string to disable failover entirely.
     llm_provider: ProviderName = ProviderName.GEMINI
-    llm_fallback_provider: ProviderName | None = ProviderName.GROK
+    llm_fallback_provider: ProviderName | None = ProviderName.GROQ
 
     # --- Per-provider models ---
-    # gemini-3.1-flash-lite: $0.25/1M in, $1.50/1M out - cheapest current tier.
-    # grok-4.3:              $1.25/1M in, $2.50/1M out, 1M context.
-    # Both are plain rewriting workloads, so the cheapest tier is the right fit.
+    # gemini-3.1-flash-lite: $0.25/1M in,  $1.50/1M out - cheapest Gemini tier.
+    # openai/gpt-oss-120b:   $0.15/1M in,  $0.60/1M out, 131k ctx, on Groq.
+    #   (openai/gpt-oss-20b at $0.075/$0.30 is the cheaper swap.)
+    # Both support schema-constrained JSON output, which is what this needs.
     gemini_model: str = "gemini-3.1-flash-lite"
-    grok_model: str = "grok-4.3"
+    groq_model: str = "openai/gpt-oss-120b"
 
     # Upper bound on a single translation's output. The JSON contract is small;
     # 2000 leaves generous headroom without letting a runaway response bill us.
     llm_max_tokens: int = 2000
+
+    # Hard ceiling on a single provider call. Without this, a hung upstream
+    # holds a worker thread until the platform's own timeout fires - and with
+    # failover configured we would rather give up early and try the other one.
+    llm_timeout_seconds: float = 45.0
 
     # --- Database (step 5) ---
     database_url: str = ""
@@ -65,6 +71,10 @@ class Settings(BaseSettings):
 
     # --- Background jobs ---
     enable_scheduler: bool = True
+
+    # Hour (UTC) at which the daily-problem job runs. A fixed wall-clock time
+    # rather than an interval, so redeploys don't keep resetting the countdown.
+    daily_job_hour: int = 3
 
     @field_validator("llm_fallback_provider", mode="before")
     @classmethod
@@ -83,14 +93,14 @@ class Settings(BaseSettings):
         """The configured credential for a provider (may be empty)."""
         return {
             ProviderName.GEMINI: self.gemini_api_key,
-            ProviderName.GROK: self.xai_api_key,
+            ProviderName.GROQ: self.groq_api_key,
         }[provider]
 
     def model_for(self, provider: ProviderName) -> str:
         """The configured model id for a provider."""
         return {
             ProviderName.GEMINI: self.gemini_model,
-            ProviderName.GROK: self.grok_model,
+            ProviderName.GROQ: self.groq_model,
         }[provider]
 
 
