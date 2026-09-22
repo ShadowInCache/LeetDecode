@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "LeetDecode - LeetCode to Plain English",
+  "version": "0.1.0",
+  "description": "Paste a LeetCode problem and get a plain-English restatement with a worked example.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LeetDecode"
+  },
+  "permissions": ["storage"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

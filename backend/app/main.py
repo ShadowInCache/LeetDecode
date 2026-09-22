@@ -4,18 +4,51 @@ Run locally:
     uvicorn app.main:app --reload --port 8000
 """
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import health
+from app.db import create_db_and_tables
+from app.routers import health, translate, usage
+from app.scheduler import shutdown_scheduler, start_scheduler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Ensure the schema exists on boot.
+
+    A database failure here is logged, not raised: /health must stay answerable
+    so the platform can distinguish "process is up but the DB is unreachable"
+    from "process is dead".
+    """
+    try:
+        create_db_and_tables()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("database initialisation failed: %s", exc)
+
+    start_scheduler(settings)
+    try:
+        yield
+    finally:
+        shutdown_scheduler()
+
 
 app = FastAPI(
     title="LeetDecode API",
     description="Translates LeetCode problem statements into plain English.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # The Chrome extension popup calls this API from a `chrome-extension://<id>`
@@ -30,3 +63,5 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(translate.router)
+app.include_router(usage.router)

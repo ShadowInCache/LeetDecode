@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LeetDecode</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1 class="title">LeetDecode</h1>
+      <p class="tagline">LeetCode problems, in plain English.</p>
+    </header>
+
+    <main>
+      <label class="sr-only" for="problem-input">LeetCode problem text</label>
+      <textarea
+        id="problem-input"
+        class="input"
+        rows="7"
+        placeholder="Paste your LeetCode problem description here..."
+        spellcheck="false"
+      ></textarea>
+
+      <p class="privacy-note">
+        Paste the problem statement only &mdash; not your solution code.
+      </p>
+
+      <button id="simplify-button" class="button" type="button">
+        Simplify Problem
+      </button>
+
+      <p id="quota" class="quota" hidden></p>
+
+      <!-- Loading -->
+      <div id="loading" class="loading" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        <span>Simplifying&hellip;</span>
+      </div>
+
+      <!-- Error / quota messages -->
+      <div id="message" class="message" hidden role="alert">
+        <p id="message-text"></p>
+        <button id="retry-button" class="button button--secondary" type="button" hidden>
+          Try again
+        </button>
+      </div>
+
+      <!-- Results -->
+      <section id="results" class="results" hidden aria-live="polite">
+        <div class="section">
+          <h2 class="section__heading">What you need to do</h2>
+          <p id="result-task" class="section__body"></p>
+        </div>
+
+        <div class="section">
+          <h2 class="section__heading">Input</h2>
+          <p id="result-input" class="section__body"></p>
+        </div>
+
+        <div class="section">
+          <h2 class="section__heading">Output</h2>
+          <p id="result-output" class="section__body"></p>
+        </div>
+
+        <div class="section">
+          <h2 class="section__heading">Important</h2>
+          <ul id="result-notes" class="notes"></ul>
+        </div>
+
+        <div class="section">
+          <h2 class="section__heading">Example</h2>
+          <dl class="example">
+            <dt>Input</dt>
+            <dd id="example-input" class="example__code"></dd>
+            <dt>Output</dt>
+            <dd id="example-output" class="example__code"></dd>
+            <dt>Why</dt>
+            <dd id="example-explanation"></dd>
+          </dl>
+        </div>
+
+        <p id="source-badge" class="source-badge"></p>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
