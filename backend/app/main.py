@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db import create_db_and_tables
 from app.observability import configure_logging, init_sentry
+from app.preflight import log_report, run as run_preflight
 from app.routers import admin, health, translate, usage
 from app.scheduler import shutdown_scheduler, start_scheduler
 
@@ -41,6 +42,10 @@ async def lifespan(_app: FastAPI):
         create_db_and_tables()
     except Exception as exc:  # noqa: BLE001
         logger.error("database initialisation failed: %s", exc)
+
+    # Say plainly what is and isn't configured. Without this, a variable that
+    # never reached the service shows up only as every translation failing.
+    log_report(run_preflight(settings))
 
     start_scheduler(settings)
     try:

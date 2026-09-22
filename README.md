@@ -182,6 +182,10 @@ python scripts/smoke_llm.py --show
 
 # Send one test error to Sentry and confirm it arrives.
 python scripts/verify_sentry.py
+
+# Check this environment is configured correctly. No LLM calls, no cost.
+python scripts/preflight.py
+railway run python scripts/preflight.py   # against the deployed environment
 ```
 
 `preseed.py` is safe to re-run: anything already cached is skipped without an
@@ -199,7 +203,7 @@ title fallback reads. A CSV with `title,body` columns works too.
 
 ```powershell
 cd backend
-pytest -q          # 159 tests, no API key or database server required
+pytest -q          # 175 tests, no API key or database server required
 ```
 
 The suite runs against in-memory SQLite with the LLM providers faked, so it needs
@@ -224,12 +228,19 @@ failover, cache hit/miss, quota accounting, the daily job, and seed-file parsing
 5. **Deploy.** [`railway.json`](backend/railway.json) supplies the start command
    and points the healthcheck at `/health`; [`Procfile`](backend/Procfile) is
    there as a fallback for other Nixpacks/Heroku-style platforms.
-6. **Seed the cache** — from the Railway shell, or locally with `DATABASE_URL`
+6. **Verify the configuration** — Railway's *Shared Variables* are **not**
+   automatically visible to a service; each one must be shared into it (the
+   **Share** button, or the service's Variables tab). This is the most common
+   way a deploy looks healthy but fails on every translation. Confirm with:
+   ```
+   railway run python scripts/preflight.py
+   ```
+7. **Seed the cache** — from the Railway shell, or locally with `DATABASE_URL`
    pointed at the production database:
    ```
    python scripts/preseed.py
    ```
-7. **Point the extension at it** — set `BACKEND_BASE_URL` in
+8. **Point the extension at it** — set `BACKEND_BASE_URL` in
    [`extension/popup.js`](extension/popup.js) to your Railway URL, reload the
    unpacked extension.
 
@@ -255,6 +266,7 @@ backend/
     usage.py           Per-install quota accounting (atomic reserve/refund)
     ratelimit.py       Postgres fixed-window limits + global spend cap
     stats.py           Dashboard aggregates
+    preflight.py       Startup + on-demand configuration checks
     observability.py   Sentry init, PII scrubbing, JSON log formatter
     call_log.py        Per-call cost recording
     pricing.py         Per-model token prices
@@ -269,7 +281,7 @@ backend/
     routers/           health.py, translate.py, usage.py, admin.py
   scripts/             preseed.py, run_daily_job.py, fetch_daily_only.py
   data/                seed_problems.json
-  tests/               159 tests
+  tests/               175 tests
 extension/
   manifest.json        MV3, `storage` permission only
   popup.html/css/js    The entire UI

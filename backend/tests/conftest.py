@@ -19,6 +19,12 @@ from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
 
 from app import db  # noqa: E402
 
+# Importing the models registers them on SQLModel.metadata. Without it, a test
+# module that never imports them would get an engine with zero tables - which
+# passes in a full-suite run (something else imported them) and fails when that
+# file is run on its own.
+import app.models  # noqa: E402,F401
+
 
 @pytest.fixture
 def engine():

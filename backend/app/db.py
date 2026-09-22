@@ -55,9 +55,15 @@ def set_engine(engine: Engine | None) -> None:
 def create_db_and_tables(engine: Engine | None = None) -> None:
     """Create any missing tables.
 
-    Adequate for this project: two append-mostly tables and no destructive
+    Adequate for this project: append-mostly tables and no destructive
     migrations. If the schema starts changing shape, bring in Alembic.
     """
+    # Importing the models is what registers them on SQLModel.metadata. Without
+    # this the call silently creates nothing whenever the caller has not already
+    # imported them - which is every path except the running app, where the
+    # routers happen to import them first.
+    import app.models  # noqa: F401
+
     SQLModel.metadata.create_all(engine or get_engine())
     logger.info("database tables ensured")
 
