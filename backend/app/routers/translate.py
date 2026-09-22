@@ -19,7 +19,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlmodel import Session, select
 
-from app import ratelimit, usage
+from app import call_log, ratelimit, stats, usage
 from app.cache import find_cached, store_translation
 from app.config import Settings, get_settings
 from app.db import get_session
@@ -84,6 +84,7 @@ def translate(
 ) -> TranslateResponse:
     ip = client_ip(request)
     limits_on = settings.rate_limits_enabled
+    stats.record_request(session)
 
     # 1. Volumetric brake, before any database or provider work.
     if limits_on:
@@ -100,6 +101,7 @@ def translate(
     # 2. Cache. Free, unlimited, and never counted against anything.
     cached = find_cached(session, payload.raw_text)
     if cached is not None:
+        stats.record_cache_hit(session)
         return TranslateResponse(
             source="cache",
             # Re-validate on the way out: a row could predate a schema change,
@@ -202,10 +204,14 @@ def translate(
 
     store_translation(session, raw_text=payload.raw_text, problem=result.problem)
 
-    logger.info(
-        "translated install_id=%s provider=%s ip=%s",
-        payload.install_id,
-        result.provider.value,
-        ip,
+    call_log.record(
+        session,
+        provider=result.provider,
+        model=result.model,
+        source=call_log.SOURCE_TRANSLATE,
+        install_id=payload.install_id,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        latency_ms=result.latency_ms,
     )
     return TranslateResponse(source="llm", data=result.problem)

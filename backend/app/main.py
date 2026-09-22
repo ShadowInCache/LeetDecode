@@ -12,16 +12,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import create_db_and_tables
-from app.routers import health, translate, usage
+from app.observability import configure_logging, init_sentry
+from app.routers import admin, health, translate, usage
 from app.scheduler import shutdown_scheduler, start_scheduler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
-
 settings = get_settings()
+
+# Logging is configured at import so even early messages are formatted.
+# Sentry is initialised in the lifespan instead: importing this module must not
+# have the side effect of wiring up a live error reporter, or simply importing
+# the app in a test sends events to the real project.
+configure_logging(settings)
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -32,6 +35,8 @@ async def lifespan(_app: FastAPI):
     so the platform can distinguish "process is up but the DB is unreachable"
     from "process is dead".
     """
+    init_sentry(settings)
+
     try:
         create_db_and_tables()
     except Exception as exc:  # noqa: BLE001
@@ -65,3 +70,4 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(translate.router)
 app.include_router(usage.router)
+app.include_router(admin.router)

@@ -8,7 +8,7 @@ Uses the Interactions API: `client.interactions.create(...)` returning an
 import logging
 
 from app.config import ProviderName, Settings
-from app.llm.base import ProviderCallFailed, ProviderNotConfigured
+from app.llm.base import ProviderCallFailed, ProviderNotConfigured, ProviderResponse
 from app.schemas import gemini_json_schema
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class GeminiProvider:
 
         self._client = genai.Client(api_key=api_key)
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ProviderResponse:
         try:
             interaction = self._client.interactions.create(
                 model=self._model,
@@ -65,10 +65,19 @@ class GeminiProvider:
                 f"Gemini returned no text (status={interaction.status!r})"
             )
 
-        logger.info(
-            "gemini translation ok model=%s status=%s chars=%d",
-            self._model,
-            interaction.status,
-            len(text),
+        # Gemini names these `total_input_tokens` / `total_output_tokens`;
+        # `thought_tokens` are reported separately and billed as output, so they
+        # are folded in to keep the cost estimate honest.
+        usage = interaction.usage
+        input_tokens = getattr(usage, "total_input_tokens", None) if usage else None
+        output_tokens = getattr(usage, "total_output_tokens", None) if usage else None
+        thought_tokens = getattr(usage, "total_thought_tokens", None) if usage else None
+        if output_tokens is not None and thought_tokens:
+            output_tokens += thought_tokens
+
+        return ProviderResponse(
+            text=text,
+            model=self._model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
-        return text

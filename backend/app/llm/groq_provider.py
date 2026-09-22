@@ -12,7 +12,7 @@ Groq output is held to exactly the same standard as Gemini output.
 import logging
 
 from app.config import ProviderName, Settings
-from app.llm.base import ProviderCallFailed, ProviderNotConfigured
+from app.llm.base import ProviderCallFailed, ProviderNotConfigured, ProviderResponse
 from app.schemas import groq_json_schema
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class GroqProvider:
     def _supports_strict(self) -> bool:
         return self._model.lower().startswith(_STRICT_CAPABLE_PREFIXES)
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ProviderResponse:
         try:
             completion = self._client.chat.completions.create(
                 model=self._model,
@@ -86,11 +86,9 @@ class GroqProvider:
             )
 
         usage = completion.usage
-        logger.info(
-            "groq translation ok model=%s finish=%s in_tokens=%s out_tokens=%s",
-            self._model,
-            choice.finish_reason,
-            getattr(usage, "prompt_tokens", None),
-            getattr(usage, "completion_tokens", None),
+        return ProviderResponse(
+            text=text,
+            model=self._model,
+            input_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+            output_tokens=getattr(usage, "completion_tokens", None) if usage else None,
         )
-        return text

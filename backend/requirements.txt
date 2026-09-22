@@ -13,6 +13,9 @@ groq>=0.11
 sqlmodel>=0.0.22
 psycopg2-binary>=2.9.9
 
+# --- Observability ---
+sentry-sdk[fastapi]>=2.0
+
 # --- Scheduler + HTTP client for the daily job (added in step 7) ---
 apscheduler>=3.10,<4.0
 httpx

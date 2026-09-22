@@ -12,7 +12,7 @@ from html.parser import HTMLParser
 import httpx
 from sqlmodel import Session
 
-from app import ratelimit
+from app import call_log, ratelimit
 from app.cache import find_cached, store_translation
 from app.config import Settings, get_settings
 from app.db import get_engine
@@ -187,6 +187,15 @@ def refresh_daily_problem(settings: Settings | None = None) -> bool:
                 raw_text=raw_text,
                 problem=result.problem,
                 is_preseeded=True,  # always free, like the curated set
+            )
+            call_log.record(
+                session,
+                provider=result.provider,
+                model=result.model,
+                source=call_log.SOURCE_DAILY_JOB,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_ms=result.latency_ms,
             )
     except Exception as exc:  # noqa: BLE001 - unattended job, must not crash
         logger.exception("daily job: unexpected failure: %s", exc)

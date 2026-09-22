@@ -92,6 +92,25 @@ class Settings(BaseSettings):
     # --- HTTP ---
     cors_allow_origins: str = "*"
 
+    # --- Observability ---
+    # Empty disables Sentry entirely; the app runs fine without it.
+    sentry_dsn: str = ""
+    sentry_environment: str = "development"
+    # Fraction of requests traced for performance data. 1.0 is fine at low
+    # volume; lower it if the Sentry quota becomes the constraint.
+    sentry_traces_sample_rate: float = 0.1
+
+    # Off by default on purpose. Enabling this sends request headers and client
+    # IPs to Sentry, which changes what the privacy policy has to disclose -
+    # the SRS commits to collecting only an anonymous install ID and the pasted
+    # problem text. Pasted text is scrubbed from error payloads either way.
+    sentry_send_pii: bool = False
+
+    # --- Admin dashboard ---
+    # Bearer token for /admin. Empty disables the dashboard entirely, which is
+    # the safe default: an unset token must never mean "no auth required".
+    admin_token: str = ""
+
     # --- Background jobs ---
     enable_scheduler: bool = True
 

@@ -110,6 +110,45 @@ class RateLimitBucket(SQLModel, table=True):
     count: int = Field(default=0, nullable=False)
 
 
+class LLMCallLog(SQLModel, table=True):
+    """One row per LLM call, for cost auditing and the usage dashboard.
+
+    The SRS asks us to "log every LLM call (tokens + cost estimate) for
+    auditing". Without this there is no way to see abuse in the data, or to
+    know what the service actually costs to run.
+
+    `cost_usd` is an *estimate* computed from a local price table, not a billed
+    figure. It is null when the model has no price on file, because a guessed
+    number is worse than an absent one.
+    """
+
+    __tablename__ = "llm_call_log"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+    provider: str = Field(sa_column=Column(String(32), index=True, nullable=False))
+    model: str = Field(sa_column=Column(String(128), index=True, nullable=False))
+
+    install_id: str | None = Field(
+        default=None, sa_column=Column(String(128), index=True, nullable=True)
+    )
+    # Where the call came from: "translate", "daily_job" or "preseed".
+    source: str = Field(sa_column=Column(String(32), index=True, nullable=False))
+
+    input_tokens: int | None = Field(default=None, nullable=True)
+    output_tokens: int | None = Field(default=None, nullable=True)
+    cost_usd: float | None = Field(default=None, nullable=True)
+
+    latency_ms: int | None = Field(default=None, nullable=True)
+    # False when the provider failed or returned schema-invalid output.
+    succeeded: bool = Field(default=True, index=True)
+
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
+
+
 # Composite index supporting the fallback lookup: find a preseeded row by title.
 Index(
     "ix_problems_cache_title_preseeded",

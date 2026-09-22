@@ -110,6 +110,11 @@ All backend settings are environment variables, documented in
 | `CORS_ALLOW_ORIGINS` | no | `*` | Comma-separated, or `*` |
 | `ENABLE_SCHEDULER` | no | `true` | `false` to skip the daily job |
 | `DAILY_JOB_HOUR` | no | `3` | UTC hour for the daily job (wall-clock, not an interval) |
+| `ADMIN_TOKEN` | no | — | Bearer token for /admin; **empty disables the dashboard** |
+| `SENTRY_DSN` | no | — | Empty disables error tracking entirely |
+| `SENTRY_ENVIRONMENT` | no | `development` | Tags events; non-`development` switches logs to JSON |
+| `SENTRY_TRACES_SAMPLE_RATE` | no | `0.1` | Fraction of requests traced |
+| `SENTRY_SEND_PII` | no | `false` | **Off by default** — see Privacy below |
 
 ¹ You need a key for whichever providers are in the chain. With the defaults,
 Gemini is required and Groq is optional — a missing `GROQ_API_KEY` just means the
@@ -124,6 +129,8 @@ fallback is skipped rather than an error.
 | `POST /translate` | `{install_id, raw_text}` → `{source: "cache"\|"llm", data: {...}}` |
 | `GET /usage/{install_id}` | `{free_calls_used, free_calls_remaining}` |
 | `GET /health` | `{status: "ok"}` |
+| `GET /admin` | Usage + cost dashboard (needs `ADMIN_TOKEN`) |
+| `GET /admin/stats` | The same data as JSON |
 
 `POST /translate` responses:
 
@@ -172,6 +179,9 @@ python scripts/fetch_daily_only.py
 # One real call per configured provider, validated. Costs a fraction of a cent.
 python scripts/smoke_llm.py
 python scripts/smoke_llm.py --show
+
+# Send one test error to Sentry and confirm it arrives.
+python scripts/verify_sentry.py
 ```
 
 `preseed.py` is safe to re-run: anything already cached is skipped without an
@@ -189,7 +199,7 @@ title fallback reads. A CSV with `title,body` columns works too.
 
 ```powershell
 cd backend
-pytest -q          # 130 tests, no API key or database server required
+pytest -q          # 159 tests, no API key or database server required
 ```
 
 The suite runs against in-memory SQLite with the LLM providers faked, so it needs
@@ -238,11 +248,16 @@ backend/
     main.py            FastAPI app, CORS, lifespan (tables + scheduler)
     config.py          Env-var settings, provider selection
     schemas.py         Pydantic contracts + the provider-facing JSON schema
-    models.py          SQLModel tables: problems_cache, usage_log, rate_limit_bucket, rate_limit_bucket
+    models.py          SQLModel tables: problems_cache, usage_log,
+                         rate_limit_bucket, llm_call_log, rate_limit_bucket
     db.py              Engine, session dependency, table creation
     cache.py           Normalise, hash, title extraction, lookup, store
     usage.py           Per-install quota accounting (atomic reserve/refund)
     ratelimit.py       Postgres fixed-window limits + global spend cap
+    stats.py           Dashboard aggregates
+    observability.py   Sentry init, PII scrubbing, JSON log formatter
+    call_log.py        Per-call cost recording
+    pricing.py         Per-model token prices
     daily.py           LeetCode GraphQL fetch + HTML→text + cache
     scheduler.py       APScheduler wiring for the 24h job
     llm/
@@ -251,10 +266,10 @@ backend/
       gemini.py        Google Gemini adapter (primary)
       groq_provider.py Groq (GroqCloud) adapter (fallback)
       service.py       Provider chain, failover, validation gate
-    routers/           health.py, translate.py, usage.py
+    routers/           health.py, translate.py, usage.py, admin.py
   scripts/             preseed.py, run_daily_job.py, fetch_daily_only.py
   data/                seed_problems.json
-  tests/               130 tests
+  tests/               159 tests
 extension/
   manifest.json        MV3, `storage` permission only
   popup.html/css/js    The entire UI
@@ -290,6 +305,17 @@ forever. The title fallback only matches *preseeded* rows — those titles are
 curated, whereas an organically cached row carries whatever first line the
 original paster happened to have, which isn't trustworthy enough to serve to
 someone else on a title match alone.
+
+**Privacy.** `SENTRY_SEND_PII` is off by default, and pasted problem text is
+scrubbed from any error payload that does reach Sentry. Sending user IPs and
+their pasted text to a third-party processor is a disclosure decision your
+privacy policy has to cover, not something to switch on by default.
+
+**Cost is measured, not guessed.** Every LLM call writes an `llm_call_log` row
+with real token counts from the provider and a cost estimate from
+`pricing.py`. Measured at ~$0.40 per 1,000 translations on the default models.
+A model with no price on file logs `cost_usd = NULL` rather than a made-up
+number.
 
 **Postgres only.** No Redis. Two append-mostly tables at this scale do not
 justify a second datastore; revisit if measured lookup latency ever says

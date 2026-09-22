@@ -9,6 +9,7 @@ nothing can reach `problems_cache` without having passed.
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -42,10 +43,14 @@ PROVIDER_FACTORIES: dict[ProviderName, Callable[[Settings], LLMProvider]] = {
 
 @dataclass(frozen=True)
 class TranslationResult:
-    """A validated translation plus the provider that produced it."""
+    """A validated translation, plus what it took to produce it."""
 
     problem: SimplifiedProblem
     provider: ProviderName
+    model: str = ""
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    latency_ms: int | None = None
 
 
 def _strip_fences(text: str) -> str:
@@ -112,11 +117,12 @@ def translate_problem(
             failures[provider_name] = exc
             continue
 
+        started = time.monotonic()
         try:
-            raw_response = provider.generate(
+            response = provider.generate(
                 system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt
             )
-            problem = validate_output(raw_response)
+            problem = validate_output(response.text)
         except Exception as exc:  # noqa: BLE001 - recorded, then we try the next one
             logger.warning(
                 "provider %s failed: %s: %s", provider_name.value, type(exc).__name__, exc
@@ -124,10 +130,19 @@ def translate_problem(
             failures[provider_name] = exc
             continue
 
+        latency_ms = int((time.monotonic() - started) * 1000)
+
         if failures:
             logger.info(
                 "translation recovered on fallback provider=%s", provider_name.value
             )
-        return TranslationResult(problem=problem, provider=provider_name)
+        return TranslationResult(
+            problem=problem,
+            provider=provider_name,
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            latency_ms=latency_ms,
+        )
 
     raise AllProvidersFailed(failures)

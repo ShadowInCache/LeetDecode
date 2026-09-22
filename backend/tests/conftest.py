@@ -6,11 +6,18 @@ detail - JSONB - is declared as a dialect variant in `app.models`, so the same
 table definitions work on both.
 """
 
-import pytest
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+import os
 
-from app import db
+# Must happen before anything imports `app.config`: a real DSN in .env would
+# otherwise have the test suite reporting its deliberate failures to the live
+# Sentry project. An env var outranks the .env file in pydantic-settings.
+os.environ["SENTRY_DSN"] = ""
+
+import pytest  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+from sqlmodel import Session, SQLModel, create_engine  # noqa: E402
+
+from app import db  # noqa: E402
 
 
 @pytest.fixture

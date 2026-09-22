@@ -18,6 +18,7 @@ from app.llm.base import (
     InvalidLLMOutput,
     ProviderCallFailed,
     ProviderNotConfigured,
+    ProviderResponse,
 )
 from app.llm.service import translate_problem, validate_output
 from tests.test_schemas import VALID
@@ -34,13 +35,18 @@ class FakeProvider:
         self._raises = raises
         self.calls = 0
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ProviderResponse:
         self.calls += 1
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         if self._raises is not None:
             raise self._raises
-        return self._returns
+        return ProviderResponse(
+            text=self._returns,
+            model=f"fake-{self.name.value}",
+            input_tokens=100,
+            output_tokens=50,
+        )
 
 
 @pytest.fixture

@@ -1,5 +1,6 @@
 """Provider-agnostic interface and error types for LLM translation."""
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from app.config import ProviderName
@@ -41,6 +42,20 @@ class AllProvidersFailed(LLMError):
         super().__init__(f"all providers failed - {detail}")
 
 
+@dataclass(frozen=True)
+class ProviderResponse:
+    """Raw output from a provider, plus whatever it reported about usage.
+
+    Token counts are optional because not every provider reports them on every
+    response; a missing count means "unknown", never zero.
+    """
+
+    text: str
+    model: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """One LLM backend.
@@ -53,8 +68,8 @@ class LLMProvider(Protocol):
 
     name: ProviderName
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
-        """Return the model's raw response text, expected to be JSON.
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ProviderResponse:
+        """Return the model's raw response text and reported token usage.
 
         Raises:
             ProviderNotConfigured: no credential available.
