@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 import httpx
 from sqlmodel import Session
 
+from app import ratelimit
 from app.cache import find_cached, store_translation
 from app.config import Settings, get_settings
 from app.db import get_engine
@@ -168,6 +169,9 @@ def refresh_daily_problem(settings: Settings | None = None) -> bool:
 
     try:
         with Session(get_engine(settings)) as session:
+            # Housekeeping: closed rate-limit windows are dead weight.
+            ratelimit.purge_expired(session)
+
             if find_cached(session, raw_text) is not None:
                 logger.info("daily job: %r already cached, skipping", daily.title)
                 return True

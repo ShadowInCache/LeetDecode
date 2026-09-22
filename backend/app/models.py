@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Index, String
+from sqlalchemy import Column, DateTime, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
@@ -78,6 +78,36 @@ class UsageLog(SQLModel, table=True):
     last_request_at: datetime = Field(
         default_factory=utcnow, sa_column=Column(DateTime(timezone=True), nullable=False)
     )
+
+
+class RateLimitBucket(SQLModel, table=True):
+    """One fixed-window counter.
+
+    Postgres-backed rather than in-process, for two reasons: an in-memory
+    counter resets on every restart (and Railway restarts often), and it would
+    not be shared if the service ever runs more than one instance. Keeping it
+    here also honours the SRS constraint that Postgres is the single source of
+    truth - no Redis.
+
+    Rows are disposable: `purge_expired()` drops windows that have passed.
+    """
+
+    __tablename__ = "rate_limit_bucket"
+    __table_args__ = (
+        UniqueConstraint("bucket_key", "window_start", name="uq_bucket_key_window"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+    # Namespaced identity, e.g. "llm:ip:203.0.113.7" or "llm:global".
+    bucket_key: str = Field(sa_column=Column(String(200), index=True, nullable=False))
+
+    # Start of the window this count belongs to, truncated to the window size.
+    window_start: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
+    )
+
+    count: int = Field(default=0, nullable=False)
 
 
 # Composite index supporting the fallback lookup: find a preseeded row by title.

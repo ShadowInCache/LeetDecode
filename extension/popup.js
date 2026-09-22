@@ -176,6 +176,29 @@ async function requestTranslation(rawText) {
     throw quotaError;
   }
 
+  if (response.status === 429) {
+    // Rate limited. Retrying immediately would just be refused again, so the
+    // message tells the user roughly how long to wait instead.
+    const retryAfter = Number(response.headers.get("Retry-After"));
+    const waitHint =
+      Number.isFinite(retryAfter) && retryAfter > 0
+        ? ` Try again in about ${Math.ceil(retryAfter / 60)} minute${
+            Math.ceil(retryAfter / 60) === 1 ? "" : "s"
+          }.`
+        : "";
+    const limitError = new Error(
+      (detail.message || "You're going a bit fast for us.") + waitHint
+    );
+    limitError.kind = "slow-down";
+    throw limitError;
+  }
+
+  if (response.status === 503 && detail.error === "AT_CAPACITY") {
+    const capacityError = new Error(detail.message);
+    capacityError.kind = "capacity";
+    throw capacityError;
+  }
+
   if (response.status === 422) {
     const validationError = new Error(
       "That doesn't look like a complete problem statement. Paste the title, " +
@@ -221,6 +244,9 @@ async function onSimplify() {
       showMessage(error.message, { allowRetry: false });
       renderQuota(0);
     } else if (error.kind === "input") {
+      showMessage(error.message, { allowRetry: false });
+    } else if (error.kind === "slow-down" || error.kind === "capacity") {
+      // Retrying now changes nothing in either case, so no retry button.
       showMessage(error.message, { allowRetry: false });
     } else if (error.kind === "retryable") {
       showMessage(error.message, { allowRetry: true });

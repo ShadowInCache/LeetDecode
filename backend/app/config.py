@@ -66,6 +66,29 @@ class Settings(BaseSettings):
     # --- Quota ---
     free_call_limit: int = 5
 
+    # --- Abuse / cost protection ---
+    # `install_id` is client-generated and unauthenticated, so the per-install
+    # quota alone is trivially reset by minting a new UUID. These are the
+    # backstop that makes /translate safe to expose publicly.
+    rate_limits_enabled: bool = True
+
+    # Every request from one IP, per hour. Generous - a volumetric brake that
+    # should never bite a real user browsing cached problems.
+    rate_limit_requests_per_hour: int = 120
+
+    # Cache *misses* from one IP, per hour. This is the real cost brake, since
+    # only a miss reaches a provider.
+    rate_limit_llm_per_hour: int = 20
+
+    # New install_ids registered from one IP, per hour. This is what closes the
+    # quota-reset vector: fresh UUIDs stop being free after a few.
+    rate_limit_new_installs_per_hour: int = 3
+
+    # Hard ceiling on LLM calls per day across every user. When this trips the
+    # service stays up in cache-only mode rather than continuing to spend.
+    # At current pricing ~1000 calls is roughly $0.50-0.75/day.
+    llm_daily_cap: int = 1000
+
     # --- HTTP ---
     cors_allow_origins: str = "*"
 

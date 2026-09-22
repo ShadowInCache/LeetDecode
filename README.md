@@ -18,11 +18,14 @@ five free generations per install.
            ▼
 ┌─────────────────────────────────────────────────┐
 │  FastAPI                                        │
-│   1. hash(raw_text) → problems_cache            │  hit  → free, no quota
-│   2. title fallback → preseeded rows            │  hit  → free, no quota
-│   3. quota check (5 per install)                │  over → 403 QUOTA_EXCEEDED
-│   4. Gemini → validate → (on failure) Groq      │  fail → 502, no quota spent
-│   5. cache + increment                          │
+│   1. per-IP request limit                       │  over → 429 + Retry-After
+│   2. hash / title → problems_cache              │  hit  → free, uncounted
+│   3. per-IP cache-miss limit                    │  over → 429  (cost brake)
+│   4. new-install-per-IP limit                   │  over → 429  (bypass guard)
+│   5. global daily LLM cap                       │  over → 503, cache-only
+│   6. per-install quota (5)                      │  over → 403 QUOTA_EXCEEDED
+│   7. Gemini → validate → (on failure) Groq      │  fail → 502, nothing spent
+│   8. cache + commit the reservations            │
 │                                                 │
 │  APScheduler, every 24h: LeetCode daily problem │
 └──────────┬──────────────────────────────────────┘
@@ -99,6 +102,11 @@ All backend settings are environment variables, documented in
 | `LLM_MAX_TOKENS` | no | `2000` | Per-translation output cap |
 | `LLM_TIMEOUT_SECONDS` | no | `45` | Per-call ceiling; fail over rather than hang |
 | `FREE_CALL_LIMIT` | no | `5` | Free generations per install |
+| `RATE_LIMITS_ENABLED` | no | `true` | `false` disables all limiting (local dev only) |
+| `RATE_LIMIT_REQUESTS_PER_HOUR` | no | `120` | All requests, per IP |
+| `RATE_LIMIT_LLM_PER_HOUR` | no | `20` | Cache misses, per IP — the cost brake |
+| `RATE_LIMIT_NEW_INSTALLS_PER_HOUR` | no | `3` | New install_ids per IP — closes quota bypass |
+| `LLM_DAILY_CAP` | no | `1000` | Global LLM calls/day; trips cache-only mode |
 | `CORS_ALLOW_ORIGINS` | no | `*` | Comma-separated, or `*` |
 | `ENABLE_SCHEDULER` | no | `true` | `false` to skip the daily job |
 | `DAILY_JOB_HOUR` | no | `3` | UTC hour for the daily job (wall-clock, not an interval) |
@@ -124,7 +132,9 @@ fallback is skipped rather than an error.
 | 200 | `{source, data}` | Served from cache or freshly generated |
 | 403 | `{detail: {error: "QUOTA_EXCEEDED", message}}` | Cache miss, 5 free calls already used |
 | 422 | FastAPI validation detail | `raw_text` under 20 chars, over 20,000, or a missing field |
+| 429 | `{detail: {error: "RATE_LIMITED", message}}` + `Retry-After` | A per-IP limit tripped |
 | 502 | `{detail: {error: "TRANSLATION_FAILED", message}}` | Every provider failed — **no quota spent** |
+| 503 | `{detail: {error: "AT_CAPACITY", message}}` + `Retry-After` | Global daily cap reached; cache still served |
 
 The translation payload is always exactly this shape, validated before it is
 cached or returned:
@@ -179,7 +189,7 @@ title fallback reads. A CSV with `title,body` columns works too.
 
 ```powershell
 cd backend
-pytest -q          # 114 tests, no API key or database server required
+pytest -q          # 130 tests, no API key or database server required
 ```
 
 The suite runs against in-memory SQLite with the LLM providers faked, so it needs
@@ -228,10 +238,11 @@ backend/
     main.py            FastAPI app, CORS, lifespan (tables + scheduler)
     config.py          Env-var settings, provider selection
     schemas.py         Pydantic contracts + the provider-facing JSON schema
-    models.py          SQLModel tables: problems_cache, usage_log
+    models.py          SQLModel tables: problems_cache, usage_log, rate_limit_bucket, rate_limit_bucket
     db.py              Engine, session dependency, table creation
     cache.py           Normalise, hash, title extraction, lookup, store
-    usage.py           Per-install quota accounting
+    usage.py           Per-install quota accounting (atomic reserve/refund)
+    ratelimit.py       Postgres fixed-window limits + global spend cap
     daily.py           LeetCode GraphQL fetch + HTML→text + cache
     scheduler.py       APScheduler wiring for the 24h job
     llm/
@@ -243,7 +254,7 @@ backend/
     routers/           health.py, translate.py, usage.py
   scripts/             preseed.py, run_daily_job.py, fetch_daily_only.py
   data/                seed_problems.json
-  tests/               114 tests
+  tests/               130 tests
 extension/
   manifest.json        MV3, `storage` permission only
   popup.html/css/js    The entire UI
