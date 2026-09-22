@@ -10,6 +10,14 @@ venv/
 .env
 .env.local
 
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Tooling artifacts
+.playwright-mcp/
+
 # OS / editors
 .DS_Store
 Thumbs.db
