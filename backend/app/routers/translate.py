@@ -16,10 +16,18 @@ free for everyone forever, which is what makes the preseeded set work.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from sqlmodel import Session, select
 
-from app import call_log, ratelimit, stats, usage
+from app import bookkeeping, call_log, ratelimit, usage
 from app.cache import find_cached, store_translation
 from app.config import Settings, get_settings
 from app.db import get_session
@@ -79,12 +87,12 @@ def translate(
     payload: TranslateRequest,
     request: Request,
     response: Response,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> TranslateResponse:
     ip = client_ip(request)
     limits_on = settings.rate_limits_enabled
-    stats.record_request(session)
 
     # 1. Volumetric brake, before any database or provider work.
     if limits_on:
@@ -101,13 +109,23 @@ def translate(
     # 2. Cache. Free, unlimited, and never counted against anything.
     cached = find_cached(session, payload.raw_text)
     if cached is not None:
-        stats.record_cache_hit(session)
+        # Everything this request still owes the database - the request
+        # counter, the cache-hit counter, last_used_at - is bookkeeping the
+        # caller does not wait for. Deferring it keeps a cache hit at one
+        # round trip instead of five.
+        background.add_task(
+            bookkeeping.record_request_outcome,
+            cache_hit=True,
+            cached_row_id=cached.id,
+        )
         return TranslateResponse(
             source="cache",
             # Re-validate on the way out: a row could predate a schema change,
             # and we would rather fail loudly than ship a malformed shape.
             data=SimplifiedProblem.model_validate(cached.simplified_json),
         )
+
+    background.add_task(bookkeeping.record_request_outcome, cache_hit=False)
 
     # From here the request may cost money.
     is_new_install = not _install_exists(session, payload.install_id)

@@ -18,8 +18,9 @@ different user on a title match alone.
 import hashlib
 import logging
 import re
+import uuid
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -79,8 +80,11 @@ def normalize_title(title: str) -> str:
 def find_cached(session: Session, raw_text: str) -> ProblemCache | None:
     """Look for an existing translation: hash first, then preseeded title.
 
-    Touches `last_used_at` on a hit so the column is meaningful for later
-    analytics, but never touches usage counters - a cache hit costs no quota.
+    A pure read. `last_used_at` is *not* updated here: this runs on the hot
+    path, and a write plus commit plus refresh added three round trips to a
+    request that should need one. `touch_last_used()` does it afterwards, off
+    the response path. Usage counters are never touched - a cache hit costs no
+    quota.
     """
     problem_hash = compute_hash(raw_text)
     row = session.exec(
@@ -100,13 +104,22 @@ def find_cached(session: Session, raw_text: str) -> ProblemCache | None:
     else:
         logger.info("cache hit via hash")
 
-    if row is not None:
-        row.last_used_at = utcnow()
-        session.add(row)
-        session.commit()
-        session.refresh(row)
-
     return row
+
+
+def touch_last_used(session: Session, row_id: uuid.UUID) -> None:
+    """Record that a cached row was served. Safe to run after the response.
+
+    A bare UPDATE by primary key: no SELECT, no ORM identity-map round trip.
+    The column feeds analytics and any future LRU eviction, so it is worth
+    keeping accurate - but never at the cost of the user's latency.
+    """
+    session.execute(
+        update(ProblemCache)
+        .where(ProblemCache.id == row_id)
+        .values(last_used_at=utcnow())
+    )
+    session.commit()
 
 
 def store_translation(

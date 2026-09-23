@@ -28,8 +28,13 @@ REQUESTS_KEY = "stats:requests"
 CACHE_HITS_KEY = "stats:cache_hits"
 
 
-def _bump(session: Session, key: str) -> None:
-    """Increment a daily counter. Best-effort: never breaks a request."""
+def bump(session: Session, key: str, *, commit: bool = True) -> None:
+    """Increment a daily counter. Best-effort: never breaks a request.
+
+    `commit=False` lets a caller batch several counters into one transaction,
+    which matters because every commit is a round trip to the database. The
+    caller is then responsible for committing.
+    """
     start = ratelimit.window_start_for(datetime.now(timezone.utc), ratelimit.DAY_SECONDS)
     try:
         updated = session.execute(
@@ -38,25 +43,34 @@ def _bump(session: Session, key: str) -> None:
             .where(RateLimitBucket.window_start == start)
             .values(count=RateLimitBucket.count + 1)
         )
-        session.commit()
         if updated.rowcount == 0:
-            session.add(RateLimitBucket(bucket_key=key, window_start=start, count=1))
+            # First request in this window - create the row. This one needs its
+            # own commit so the IntegrityError can be caught and swallowed
+            # without discarding a batch of other pending counter updates.
+            savepoint = session.begin_nested()
             try:
-                session.commit()
+                session.add(
+                    RateLimitBucket(bucket_key=key, window_start=start, count=1)
+                )
+                savepoint.commit()
             except IntegrityError:
                 # Lost the create race; the other writer's increment stands.
-                session.rollback()
+                savepoint.rollback()
+        if commit:
+            session.commit()
     except Exception:  # noqa: BLE001 - a stats counter must not break traffic
         session.rollback()
         logger.debug("failed to bump counter %s", key, exc_info=True)
 
 
+# Backwards-compatible aliases; the router now defers these to a background
+# task rather than calling them inline.
 def record_request(session: Session) -> None:
-    _bump(session, REQUESTS_KEY)
+    bump(session, REQUESTS_KEY)
 
 
 def record_cache_hit(session: Session) -> None:
-    _bump(session, CACHE_HITS_KEY)
+    bump(session, CACHE_HITS_KEY)
 
 
 def _daily_counter(session: Session, key: str, day: datetime) -> int:

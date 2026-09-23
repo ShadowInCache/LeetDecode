@@ -34,6 +34,9 @@ from app.models import RateLimitBucket
 
 logger = logging.getLogger(__name__)
 
+#: Sentinel for LimitResult.used when the count was deliberately not read.
+UNKNOWN_USAGE = -1
+
 HOUR_SECONDS = 3600
 DAY_SECONDS = 86_400
 
@@ -44,11 +47,20 @@ class LimitResult:
 
     allowed: bool
     limit: int
+    #: Units consumed in this window, or `UNKNOWN_USAGE` when it was not read
+    #: back. The allowed path skips that query on purpose - see `consume()`.
     used: int
     retry_after_seconds: int
 
     @property
-    def remaining(self) -> int:
+    def usage_known(self) -> bool:
+        return self.used != UNKNOWN_USAGE
+
+    @property
+    def remaining(self) -> int | None:
+        """Units left, or None when the count was not read back."""
+        if not self.usage_known:
+            return None
         return max(0, self.limit - self.used)
 
 
@@ -96,8 +108,12 @@ def consume(
     )
     session.commit()
     if claimed.rowcount > 0:
-        used = _current_count(session, key, start)
-        return LimitResult(True, limit, used, retry_after)
+        # Deliberately not re-reading the count here. This is the hot path -
+        # every allowed request runs it - and the exact `used` figure is only
+        # ever displayed, never acted on. One saved SELECT is one saved
+        # round trip to the database, which at ~56ms is worth more than a
+        # precise number nobody reads.
+        return LimitResult(True, limit, UNKNOWN_USAGE, retry_after)
 
     # Either the row is missing (first request in this window) or it is full.
     existing = _current_count(session, key, start)
