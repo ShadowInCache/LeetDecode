@@ -4,7 +4,7 @@ Run locally:
     uvicorn app.main:app --reload --port 8000
 
 A note on the try/except around `get_settings()`. Pydantic raises on any
-malformed environment variable - `LLM_PROVIDER=grok`, `DAILY_JOB_HOUR=3am`,
+malformed environment variable - `LLM_PROVIDER=groq`, `DAILY_JOB_HOUR=3am`,
 `LLM_DAILY_CAP=1,000`. Because settings are built while this module is being
 imported, an unguarded failure means uvicorn never starts: the platform serves
 502s, `/health` is unreachable, and the only evidence is a traceback buried in
@@ -37,12 +37,36 @@ except Exception as exc:  # noqa: BLE001 - reported through the app, not a crash
     config_error = exc
 
 
+def _safe_detail(error: Exception) -> str:
+    """Describe a configuration failure without disclosing any value.
+
+    `str(ValidationError)` embeds pydantic's `input_value` - the offending
+    value itself. That is unacceptable here, because this text is served over
+    HTTP without authentication and a misconfigured variable is very often a
+    pasted secret. This happened for real: an API key ended up in
+    `LLM_PROVIDER` and the error page served it to anyone who asked.
+
+    So the detail is rebuilt from field names and messages only. The messages
+    themselves are already written not to quote suspicious values (see
+    `config._describe_value`).
+    """
+    errors = getattr(error, "errors", None)
+    if not callable(errors):
+        return f"{type(error).__name__}: configuration could not be loaded."
+
+    lines = []
+    for item in errors():
+        field = ".".join(str(part) for part in item.get("loc", ())) or "(root)"
+        lines.append(f"{field.upper()}: {item.get('msg', 'invalid value')}")
+    return "\n".join(lines) or "Configuration could not be loaded."
+
+
 def _build_misconfigured_app(error: Exception) -> FastAPI:
     """An app that does nothing but explain why it cannot run."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)s: %(message)s"
     )
-    detail = str(error)
+    detail = _safe_detail(error)
     logger.error("CONFIGURATION ERROR - the service cannot start normally:\n%s", detail)
     logger.error(
         "Fix the offending environment variable and redeploy. "

@@ -46,8 +46,11 @@ def _restore_app_module():
 @pytest.mark.parametrize(
     ("variable", "value"),
     [
-        # The Grok/Groq misspelling - the likeliest typo on this project.
-        ("LLM_PROVIDER", "grok"),
+        # DELIBERATELY INVALID: "groq" (xAI) is not "groq" (GroqCloud).
+        # One letter apart, and the exact typo that took production down.
+        # Do not "correct" this to groq - that is the valid value, and the
+        # test asserts this one is *rejected*.
+        ("LLM_PROVIDER", "groq"),
         ("LLM_FALLBACK_PROVIDER", "google"),
         ("DAILY_JOB_HOUR", "3am"),
         ("LLM_DAILY_CAP", "1,000"),
@@ -71,7 +74,7 @@ def test_bad_config_starts_anyway_and_explains_itself(
 
 
 def test_every_other_route_also_refuses_clearly(monkeypatch) -> None:
-    main = _reload_app(monkeypatch, LLM_PROVIDER="grok")
+    main = _reload_app(monkeypatch, LLM_PROVIDER="groq")
     client = TestClient(main.app)
 
     for method, path in [("post", "/translate"), ("get", "/usage/abc"), ("get", "/admin")]:

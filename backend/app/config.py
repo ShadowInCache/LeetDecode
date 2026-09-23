@@ -14,6 +14,30 @@ class ProviderName(str, Enum):
     GROQ = "groq"
 
 
+#: Prefixes that mark a value as a credential rather than a setting.
+_SECRET_PREFIXES = ("gsk_", "sk-", "sk_", "AIza", "AQ.", "postgres", "https://", "pk_")
+
+
+def _describe_value(value: str) -> str:
+    """Describe a rejected config value without disclosing it.
+
+    Anything that looks like a credential, or is simply long, is reported by
+    shape only. A wrong environment variable is very often a secret pasted into
+    the wrong box, and this description ends up in logs and in the HTTP error
+    body - so it must never be the value itself.
+    """
+    cleaned = value.strip()
+    if not cleaned:
+        return "an empty value"
+    if cleaned.startswith(_SECRET_PREFIXES) or len(cleaned) > 24:
+        return (
+            f"a {len(cleaned)}-character value that looks like a credential, "
+            "not a provider name - check you have not pasted an API key here"
+        )
+    # Short and unremarkable: safe to quote, and far more useful named.
+    return repr(cleaned)
+
+
 class Settings(BaseSettings):
     """All runtime configuration for the LeetDecode backend.
 
@@ -184,8 +208,13 @@ class Settings(BaseSettings):
 
         valid = {p.value for p in ProviderName}
         if cleaned not in valid:
+            # Never echo the supplied value. A misconfigured variable is
+            # routinely a *pasted secret* in the wrong box - an API key ending
+            # up in LLM_PROVIDER is exactly how this went wrong in practice -
+            # and this message reaches logs and error pages.
             raise ValueError(
-                f"{info.field_name.upper()}={v!r} is not a known provider. "
+                f"{info.field_name.upper()} is not a known provider "
+                f"(received {_describe_value(v)}). "
                 f"Valid values: {', '.join(sorted(valid))}."
             )
         return cleaned
