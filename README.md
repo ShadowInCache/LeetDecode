@@ -72,6 +72,15 @@ Tables are created automatically on first boot — no migration step.
 > poking. `simplified_json` is declared as `JSON` with a Postgres `JSONB`
 > variant, so the same models run on both. Use Postgres for anything real.
 
+**Using Supabase instead?** Take the **session pooler** connection string
+(*Settings → Database → Connection string → Session pooler*), port 5432 on
+`…pooler.supabase.com`. Do **not** use the direct `db.<ref>.supabase.co`
+string: it is IPv6-only on the free tier and Railway is IPv4, so it fails with
+an unhelpful timeout. The transaction pooler (6543) is also wrong here — it
+disallows prepared statements and targets serverless, not a long-lived FastAPI
+process. Note the username is `postgres.<project-ref>`, not `postgres`. Free
+Supabase projects also pause after about a week of inactivity.
+
 ### 3. Extension
 
 1. Open `chrome://extensions`
@@ -94,7 +103,10 @@ All backend settings are environment variables, documented in
 |---|---|---|---|
 | `GEMINI_API_KEY` | yes¹ | — | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `GROQ_API_KEY` | no¹ | — | [console.groq.com/keys](https://console.groq.com/keys) — needed only if Groq is in the chain |
-| `DATABASE_URL` | yes | — | Railway injects this automatically |
+| `DATABASE_URL` | yes | — | Railway injects it; for Supabase use the **session pooler** string |
+| `DB_POOL_SIZE` | no | `5` | Client-side pool depth |
+| `DB_MAX_OVERFLOW` | no | `5` | Extra connections above the pool |
+| `DB_POOL_RECYCLE_SECONDS` | no | `1800` | Recycle before a pooler drops idle handles |
 | `LLM_PROVIDER` | no | `gemini` | `gemini` \| `groq` |
 | `LLM_FALLBACK_PROVIDER` | no | `groq` | Blank disables failover |
 | `GEMINI_MODEL` | no | `gemini-3.1-flash-lite` | $0.25/$1.50 per 1M tokens |

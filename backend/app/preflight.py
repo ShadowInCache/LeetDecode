@@ -114,12 +114,33 @@ def _check_database(settings: Settings, report: Report) -> None:
 
     try:
         from app.db import get_engine
+    except ImportError as exc:
+        # Not a connectivity problem at all - almost always the wrong
+        # interpreter, i.e. the system Python instead of the venv.
+        report.add(
+            "dependencies",
+            Level.FAIL,
+            f"{exc}. Run with the virtualenv interpreter: "
+            r".venv\Scripts\python.exe scripts/preflight.py",
+        )
+        return
 
+    try:
         engine = get_engine(settings)
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except Exception as exc:  # noqa: BLE001 - the message is the point
-        report.add("database", Level.FAIL, f"cannot connect: {exc}")
+        hint = ""
+        message = str(exc)
+        if "could not translate host name" in message and ".supabase.co" in message:
+            hint = (
+                " | This is Supabase's DIRECT endpoint, which is IPv6-only on the "
+                "free tier. Use the SESSION POOLER string instead: host ends in "
+                ".pooler.supabase.com and the user is postgres.<project-ref>."
+            )
+        elif "password authentication failed" in message:
+            hint = " | Check the password, and URL-encode any @ : / ? # characters."
+        report.add("database", Level.FAIL, f"cannot connect: {exc}{hint}")
         return
 
     report.add("database", Level.OK, f"reachable ({engine.dialect.name})")

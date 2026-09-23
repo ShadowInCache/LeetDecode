@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     # --- Database (step 5) ---
     database_url: str = ""
 
+    # --- Database pool ---
+    # Kept small on purpose. Managed Postgres has a connection ceiling, and a
+    # pooled provider (Supabase Supavisor, PgBouncer) sits in front of it - so
+    # a large client-side pool just burns the shared budget. This app is
+    # request/response with short queries; it does not need depth.
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    # Recycle before a pooler or cloud provider silently drops an idle handle.
+    db_pool_recycle_seconds: int = 1800
+
     # --- Quota ---
     free_call_limit: int = 5
 

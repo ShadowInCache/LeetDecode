@@ -38,10 +38,20 @@ def get_engine(settings: Settings | None = None) -> Engine:
         )
 
     url = _normalize_url(settings.database_url)
+
+    # SQLite (tests, local poking) rejects the pool arguments below.
+    options: dict = {"pool_pre_ping": True, "echo": False}
+    if not url.startswith("sqlite"):
+        options.update(
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+            pool_recycle=settings.db_pool_recycle_seconds,
+        )
+
     # pool_pre_ping avoids handing out connections that a managed Postgres has
-    # already closed behind our back, which is the usual cause of the first
-    # request after an idle period failing on platforms like Railway.
-    _engine = create_engine(url, pool_pre_ping=True, echo=False)
+    # already closed behind our back - the usual cause of the first request
+    # after an idle period failing on Railway, or through Supabase's pooler.
+    _engine = create_engine(url, **options)
     logger.info("database engine created dialect=%s", _engine.dialect.name)
     return _engine
 
