@@ -30,6 +30,14 @@ USER appuser
 # Documentation only - Railway routes to whatever $PORT it injects.
 EXPOSE 8080
 
-# Shell form on purpose, so ${PORT} is expanded at runtime. Railway sets PORT;
-# the default keeps `docker run` working locally without one.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}
+# Exec form wrapping `sh -c`, for two reasons:
+#
+#  1. `exec uvicorn` replaces the shell, so uvicorn receives SIGTERM directly
+#     and shuts down gracefully. A bare shell-form CMD leaves uvicorn as a
+#     child that never sees the signal, and the platform SIGKILLs it after a
+#     timeout - dropping any in-flight request.
+#  2. PORT is sanitised to digits before being passed on. uvicorn parses
+#     --port with click, and a non-numeric value aborts with a usage error
+#     *before* the application loads - which looks like a mystery crash with
+#     no application log to explain it.
+CMD ["sh", "-c", "PORT_CLEAN=$(printf '%s' \"${PORT:-8080}\" | tr -cd '0-9'); exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT_CLEAN:-8080}\""]
