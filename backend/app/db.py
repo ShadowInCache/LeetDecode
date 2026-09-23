@@ -40,7 +40,7 @@ def get_engine(settings: Settings | None = None) -> Engine:
     url = _normalize_url(settings.database_url)
 
     # SQLite (tests, local poking) rejects the pool arguments below.
-    options: dict = {"pool_pre_ping": True, "echo": False}
+    options: dict = {"pool_pre_ping": settings.db_pool_pre_ping, "echo": False}
     if not url.startswith("sqlite"):
         options.update(
             pool_size=settings.db_pool_size,

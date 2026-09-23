@@ -73,6 +73,14 @@ class Settings(BaseSettings):
     # Recycle before a pooler or cloud provider silently drops an idle handle.
     db_pool_recycle_seconds: int = 1800
 
+    # Validate a pooled connection before handing it out. This costs one
+    # extra round trip per request - measured at ~55ms against Supabase -
+    # and buys immunity to a connection the pooler dropped behind our back.
+    # Left on by default: an occasional 500 is worse than 55ms. Turn it off
+    # if latency matters more than that, since db_pool_recycle_seconds
+    # already replaces connections proactively.
+    db_pool_pre_ping: bool = True
+
     # --- Quota ---
     free_call_limit: int = 5
 

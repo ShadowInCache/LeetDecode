@@ -107,6 +107,7 @@ All backend settings are environment variables, documented in
 | `DB_POOL_SIZE` | no | `5` | Client-side pool depth |
 | `DB_MAX_OVERFLOW` | no | `5` | Extra connections above the pool |
 | `DB_POOL_RECYCLE_SECONDS` | no | `1800` | Recycle before a pooler drops idle handles |
+| `DB_POOL_PRE_PING` | no | `true` | Validate connections; costs ~55ms/request |
 | `LLM_PROVIDER` | no | `gemini` | `gemini` \| `groq` |
 | `LLM_FALLBACK_PROVIDER` | no | `groq` | Blank disables failover |
 | `GEMINI_MODEL` | no | `gemini-3.1-flash-lite` | $0.25/$1.50 per 1M tokens |
@@ -215,7 +216,7 @@ title fallback reads. A CSV with `title,body` columns works too.
 
 ```powershell
 cd backend
-pytest -q          # 175 tests, no API key or database server required
+pytest -q          # 183 tests, no API key or database server required
 ```
 
 The suite runs against in-memory SQLite with the LLM providers faked, so it needs
@@ -284,6 +285,7 @@ backend/
     ratelimit.py       Postgres fixed-window limits + global spend cap
     stats.py           Dashboard aggregates
     preflight.py       Startup + on-demand configuration checks
+    bookkeeping.py     Deferred writes, run after the response is sent
     observability.py   Sentry init, PII scrubbing, JSON log formatter
     call_log.py        Per-call cost recording
     pricing.py         Per-model token prices
@@ -298,7 +300,7 @@ backend/
     routers/           health.py, translate.py, usage.py, admin.py
   scripts/             preseed.py, run_daily_job.py, fetch_daily_only.py
   data/                seed_problems.json
-  tests/               175 tests
+  tests/               183 tests
 extension/
   manifest.json        MV3, `storage` permission only
   popup.html/css/js    The entire UI
