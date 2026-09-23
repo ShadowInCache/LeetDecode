@@ -1,0 +1,23 @@
+# Never bake secrets or local state into the image.
+.env
+.env.*
+!.env.example
+
+# Local virtualenv - the image installs its own dependencies.
+.venv/
+venv/
+
+# Python noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Not needed at runtime
+tests/
+requirements-dev.txt
+pytest.ini

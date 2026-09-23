@@ -237,9 +237,14 @@ failover, cache hit/miss, quota accounting, the daily job, and seed-file parsing
    is what SQLAlchemy needs.)
 4. **Set the variables** — at minimum `GEMINI_API_KEY`. Add `GROQ_API_KEY` if you
    want the Groq fallback live.
-5. **Deploy.** [`railway.json`](backend/railway.json) supplies the start command
-   and points the healthcheck at `/health`; [`Procfile`](backend/Procfile) is
-   there as a fallback for other Nixpacks/Heroku-style platforms.
+5. **Deploy.** The build uses [`backend/Dockerfile`](backend/Dockerfile), which
+   Railway picks up automatically from the root directory. That is deliberate:
+   Railway's builder auto-detection (Railpack) failed to recognise this as a
+   Python project, and an explicit Dockerfile builds identically everywhere.
+   [`railway.json`](railway.json) at the **repo root** sets the healthcheck —
+   note that Railway's config file does *not* follow the Root Directory
+   setting, so it must live at the root even though the service builds from
+   `backend/`. [`Procfile`](backend/Procfile) remains for Heroku-style hosts.
 6. **Verify the configuration** — Railway's *Shared Variables* are **not**
    automatically visible to a service; each one must be shared into it (the
    **Share** button, or the service's Variables tab). This is the most common
