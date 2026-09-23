@@ -150,3 +150,38 @@ def test_default_models_are_all_priced(provider: ProviderName) -> None:
     from app.pricing import PRICES
 
     assert Settings().model_for(provider) in PRICES
+
+
+class TestPastedSecretHygiene:
+    """A trailing newline on a pasted secret must not reach the driver.
+
+    This is not hypothetical: it cost a real deploy cycle, surfacing as
+    `FATAL: database "postgres\n" does not exist` - which reads like a missing
+    database rather than a stray character.
+    """
+
+    def test_trailing_newline_is_stripped_from_database_url(self) -> None:
+        from urllib.parse import urlparse
+
+        settings = Settings(
+            database_url="postgresql://u:p@host.pooler.supabase.com:5432/postgres\n"
+        )
+        assert urlparse(settings.database_url).path.lstrip("/") == "postgres"
+
+    def test_whitespace_is_stripped_from_api_keys(self) -> None:
+        settings = Settings(
+            gemini_api_key="  gem-key\n", groq_api_key="\tgsk_key  ",
+        )
+        assert settings.gemini_api_key == "gem-key"
+        assert settings.groq_api_key == "gsk_key"
+
+    def test_admin_token_and_dsn_are_stripped(self) -> None:
+        settings = Settings(admin_token=" tok\n", sentry_dsn="https://x@y/1\n")
+        assert settings.admin_token == "tok"
+        assert settings.sentry_dsn == "https://x@y/1"
+
+    def test_a_whitespace_only_key_still_counts_as_unset(self) -> None:
+        """Otherwise preflight would report a provider as configured."""
+        settings = Settings(gemini_api_key="   \n", groq_api_key="")
+        report = run(settings, include_database=False)
+        assert levels(report)["llm providers"] is Level.FAIL

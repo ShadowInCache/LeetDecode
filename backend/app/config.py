@@ -128,6 +128,28 @@ class Settings(BaseSettings):
     # rather than an interval, so redeploys don't keep resetting the countdown.
     daily_job_hour: int = 3
 
+    @field_validator(
+        "database_url",
+        "gemini_api_key",
+        "groq_api_key",
+        "admin_token",
+        "sentry_dsn",
+        mode="before",
+    )
+    @classmethod
+    def _strip_whitespace(cls, v: object) -> object:
+        """Trim stray whitespace from pasted secrets.
+
+        Copying a connection string or API key out of a dashboard very often
+        brings a trailing newline with it, and the resulting failure is
+        baffling: a URL ending in a newline produces
+        `FATAL: database "postgres\n" does not exist`, and an API key with one
+        fails authentication for no visible reason. Neither value can
+        legitimately carry leading or trailing whitespace, so stripping it is
+        safe and saves a deploy cycle.
+        """
+        return v.strip() if isinstance(v, str) else v
+
     @field_validator("llm_fallback_provider", mode="before")
     @classmethod
     def _blank_fallback_means_disabled(cls, v: object) -> object:
