@@ -16,6 +16,13 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
+# xAI's "Grok" versus GroqCloud's "Groq" - one letter apart, and the typo that
+# actually took this service down. Assembled from fragments on purpose: a
+# blanket find-and-replace of the misspelling has twice turned these cases into
+# the *valid* value, which silently guts the tests rather than failing loudly.
+INVALID_PROVIDER = "gro" + "k"
+VALID_PROVIDER = "gro" + "q"
+
 
 def _reload_app(monkeypatch, **env: str):
     """Re-import app.main with a given environment."""
@@ -46,11 +53,8 @@ def _restore_app_module():
 @pytest.mark.parametrize(
     ("variable", "value"),
     [
-        # DELIBERATELY INVALID: "groq" (xAI) is not "groq" (GroqCloud).
-        # One letter apart, and the exact typo that took production down.
-        # Do not "correct" this to groq - that is the valid value, and the
-        # test asserts this one is *rejected*.
-        ("LLM_PROVIDER", "groq"),
+        # Must stay INVALID - see INVALID_PROVIDER above.
+        ("LLM_PROVIDER", INVALID_PROVIDER),
         ("LLM_FALLBACK_PROVIDER", "google"),
         ("DAILY_JOB_HOUR", "3am"),
         ("LLM_DAILY_CAP", "1,000"),
@@ -74,7 +78,7 @@ def test_bad_config_starts_anyway_and_explains_itself(
 
 
 def test_every_other_route_also_refuses_clearly(monkeypatch) -> None:
-    main = _reload_app(monkeypatch, LLM_PROVIDER="groq")
+    main = _reload_app(monkeypatch, LLM_PROVIDER=INVALID_PROVIDER)
     client = TestClient(main.app)
 
     for method, path in [("post", "/translate"), ("get", "/usage/abc"), ("get", "/admin")]:
@@ -85,7 +89,9 @@ def test_every_other_route_also_refuses_clearly(monkeypatch) -> None:
 
 def test_a_valid_config_is_completely_unaffected(monkeypatch) -> None:
     """The guard must not change anything on the happy path."""
-    main = _reload_app(monkeypatch, LLM_PROVIDER="groq", LLM_FALLBACK_PROVIDER="gemini")
+    main = _reload_app(
+        monkeypatch, LLM_PROVIDER=VALID_PROVIDER, LLM_FALLBACK_PROVIDER="gemini"
+    )
     assert main.config_error is None
 
     client = TestClient(main.app)
