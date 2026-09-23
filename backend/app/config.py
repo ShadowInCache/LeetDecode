@@ -3,7 +3,7 @@
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -158,13 +158,37 @@ class Settings(BaseSettings):
         """
         return v.strip() if isinstance(v, str) else v
 
-    @field_validator("llm_fallback_provider", mode="before")
+    @field_validator("llm_provider", "llm_fallback_provider", mode="before")
     @classmethod
-    def _blank_fallback_means_disabled(cls, v: object) -> object:
-        """Treat LLM_FALLBACK_PROVIDER="" as "no fallback" rather than an error."""
-        if isinstance(v, str) and not v.strip():
-            return None
-        return v
+    def _normalise_provider(cls, v: object, info: ValidationInfo) -> object:
+        """Accept any casing or stray whitespace for a provider name.
+
+        `LLM_PROVIDER=Groq` used to crash the service at import: the enum only
+        matched lowercase, and `Settings()` is constructed while `app.main` is
+        being imported - so uvicorn never started and the platform served 502s
+        with no application log to explain them.
+
+        A provider name has no meaningful case, so a typed variant should work
+        rather than take the service down. A genuinely unknown name is still a
+        hard error, but one that names the valid options.
+        """
+        if not isinstance(v, str):
+            return v
+
+        cleaned = v.strip().lower()
+
+        if not cleaned:
+            # Empty means "no fallback" for the optional field, and "use the
+            # default" for the required one - never a validation error.
+            return None if info.field_name == "llm_fallback_provider" else ProviderName.GEMINI
+
+        valid = {p.value for p in ProviderName}
+        if cleaned not in valid:
+            raise ValueError(
+                f"{info.field_name.upper()}={v!r} is not a known provider. "
+                f"Valid values: {', '.join(sorted(valid))}."
+            )
+        return cleaned
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -185,3 +185,47 @@ class TestPastedSecretHygiene:
         settings = Settings(gemini_api_key="   \n", groq_api_key="")
         report = run(settings, include_database=False)
         assert levels(report)["llm providers"] is Level.FAIL
+
+
+class TestProviderNameTolerance:
+    """A mistyped provider name must not take the service down.
+
+    `LLM_PROVIDER=Groq` crashed production: `Settings()` is built while
+    `app.main` imports, so a ValidationError there means uvicorn never starts
+    and the platform serves 502s with no application log to explain them.
+    """
+
+    @pytest.mark.parametrize(
+        "value", ["groq", "Groq", "GROQ", " groq ", "groq\n", "\tGroq"]
+    )
+    def test_casing_and_whitespace_are_tolerated(self, value: str) -> None:
+        assert Settings(llm_provider=value).llm_provider is ProviderName.GROQ
+
+    @pytest.mark.parametrize("value", ["gemini", "Gemini", "GEMINI", " gemini"])
+    def test_the_other_provider_too(self, value: str) -> None:
+        assert Settings(llm_provider=value).llm_provider is ProviderName.GEMINI
+
+    def test_empty_primary_falls_back_to_the_default(self) -> None:
+        assert Settings(llm_provider="").llm_provider is ProviderName.GEMINI
+
+    def test_empty_fallback_means_failover_disabled(self) -> None:
+        assert Settings(llm_fallback_provider="").llm_fallback_provider is None
+
+    def test_fallback_accepts_odd_casing_too(self) -> None:
+        settings = Settings(llm_fallback_provider="GEMINI")
+        assert settings.llm_fallback_provider is ProviderName.GEMINI
+
+    def test_an_unknown_provider_is_still_an_error(self) -> None:
+        """Tolerant of typos in form, not of genuinely wrong values."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="not a known provider"):
+            Settings(llm_provider="openai")
+
+    def test_the_error_names_the_valid_options(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc:
+            Settings(llm_provider="anthropic")
+        message = str(exc.value)
+        assert "gemini" in message and "groq" in message

@@ -1,10 +1,11 @@
 "use strict";
 
 // ---------------------------------------------------------------------------
-// Swap this between local development and your deployed Railway URL.
-// No trailing slash.
+// Backend base URL. No trailing slash.
+//   production : https://leetdecode-production.up.railway.app
+//   local dev  : http://127.0.0.1:8000
 // ---------------------------------------------------------------------------
-const BACKEND_BASE_URL = "http://127.0.0.1:8000";
+const BACKEND_BASE_URL = "https://leetdecode-production.up.railway.app";
 
 const INSTALL_ID_KEY = "leetdecode_install_id";
 
